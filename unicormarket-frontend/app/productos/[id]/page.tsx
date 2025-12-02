@@ -22,6 +22,12 @@ interface PublicacionDetalle {
   imagenes: string[];
 }
 
+interface UsuarioLocal {
+  id: string;
+  nombre?: string;
+  correo_institucional?: string;
+}
+
 export default function PublicacionDetallePage() {
   const params = useParams();
   const router = useRouter();
@@ -31,6 +37,12 @@ export default function PublicacionDetallePage() {
   const [loading, setLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [mensajeOrden, setMensajeOrden] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<UsuarioLocal | null>(null);
+
+  // Estado para "pasarela" de compra
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [cantidad, setCantidad] = useState(1);
+  const [creatingOrder, setCreatingOrder] = useState(false);
 
   // Cargar publicación
   useEffect(() => {
@@ -50,40 +62,54 @@ export default function PublicacionDetallePage() {
     fetchData();
   }, [id]);
 
-  // Verificar si hay sesión (token en localStorage)
+  // Verificar sesión y usuario actual
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = localStorage.getItem("accessToken");
     setIsLoggedIn(!!token);
+
+    const userStr = localStorage.getItem("user");
+    if (userStr) {
+      try {
+        const parsed = JSON.parse(userStr);
+        setCurrentUser(parsed);
+      } catch {
+        // ignore
+      }
+    }
   }, []);
 
-  // Crear orden de compra
-  const handleCrearOrden = async () => {
+  const isOwner = !!currentUser && !!data && currentUser.id === data.usuario_id;
+
+  // Lógica para crear orden (usada por la "pasarela")
+  const handleCrearOrden = async (cantOrden: number): Promise<boolean> => {
     try {
       setMensajeOrden(null);
 
       if (!data) {
         setMensajeOrden("No se encontró la publicación");
-        return;
+        return false;
       }
 
       if (typeof window === "undefined") {
         setMensajeOrden("No se pudo acceder al navegador");
-        return;
+        return false;
       }
 
       const token = localStorage.getItem("accessToken");
 
       if (!token) {
-        setMensajeOrden("Debes iniciar sesión para crear una orden");
-        return;
+        setMensajeOrden("Debes iniciar sesión para comprar este producto");
+        return false;
       }
+
+      setCreatingOrder(true);
 
       const res = await api.post(
         "/api/ordenes",
         {
           publicacion_id: data.id,
-          cantidad: 1,
+          cantidad: cantOrden,
         },
         {
           headers: {
@@ -96,16 +122,64 @@ export default function PublicacionDetallePage() {
         setMensajeOrden(
           (res.data as any)?.message || "No se pudo crear la orden"
         );
-        return;
+        return false;
       }
 
       setMensajeOrden("Orden creada correctamente ✅");
+      return true;
     } catch (error: any) {
       console.error("Error creando orden:", error);
       const msg =
         error?.response?.data?.message ||
         "Error al crear la orden. Intenta de nuevo.";
       setMensajeOrden(msg);
+      return false;
+    } finally {
+      setCreatingOrder(false);
+    }
+  };
+
+  // Confirmar compra desde el modal
+  const handleConfirmarCompra = async () => {
+    if (!data) return;
+    const success = await handleCrearOrden(cantidad);
+    if (success) {
+      setShowCheckout(false);
+      // si quieres, redirige a /ordenes:
+      // router.push("/ordenes");
+    }
+  };
+
+  // Eliminar publicación (solo dueño)
+  const handleEliminarPublicacion = async () => {
+    if (!data) return;
+
+    const seguro = window.confirm(
+      "¿Seguro que deseas eliminar esta publicación? Esta acción no se puede deshacer."
+    );
+    if (!seguro) return;
+
+    try {
+      const token = localStorage.getItem("accessToken");
+      if (!token) {
+        alert("Debes iniciar sesión.");
+        return;
+      }
+
+      await api.delete(`/api/publicaciones/${data.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      alert("Publicación eliminada correctamente.");
+      router.push("/productos");
+    } catch (error: any) {
+      console.error("Error eliminando publicación:", error);
+      alert(
+        error?.response?.data?.message ||
+          "Error al eliminar la publicación. Intenta de nuevo."
+      );
     }
   };
 
@@ -130,6 +204,8 @@ export default function PublicacionDetallePage() {
   }
 
   const firstImage = data.imagenes?.[0];
+  const precioUnitario = data.precio ?? 0;
+  const totalEstimado = precioUnitario * cantidad;
 
   return (
     <main className="min-h-screen px-6 py-10">
@@ -210,18 +286,39 @@ export default function PublicacionDetallePage() {
                   Abrir chat de la publicación
                 </button>
 
-                <button
-                  onClick={handleCrearOrden}
-                  className="mt-3 inline-flex items-center rounded-full bg-blue-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-blue-400"
-                >
-                  Crear orden de compra
-                </button>
+                {/* Botón tipo "pasarela" */}
+                {data.modalidad !== "donacion" && data.precio !== null && (
+                  <button
+                    onClick={() => setShowCheckout(true)}
+                    className="mt-3 inline-flex items-center rounded-full bg-blue-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-blue-400"
+                  >
+                    Comprar producto
+                  </button>
+                )}
+
+                {/* Botones solo para el dueño */}
+                {isOwner && (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => router.push(`/productos/editar/${data.id}`)}
+                      className="inline-flex items-center rounded-full bg-slate-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-500"
+                    >
+                      Editar publicación
+                    </button>
+                    <button
+                      onClick={handleEliminarPublicacion}
+                      className="inline-flex items-center rounded-full bg-red-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-red-500"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                )}
               </>
             )}
 
             {!isLoggedIn && (
               <p className="mt-2 text-[11px] text-slate-500">
-                Inicia sesión para chatear o crear una orden de compra.
+                Inicia sesión para chatear o comprar este producto.
               </p>
             )}
 
@@ -239,6 +336,63 @@ export default function PublicacionDetallePage() {
           </div>
         </section>
       </div>
+
+      {/* Modal "pasarela de pago" */}
+      {showCheckout && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-5 space-y-4">
+            <h2 className="text-lg font-semibold text-white">
+              Confirmar compra
+            </h2>
+
+            <p className="text-sm text-slate-300">{data.titulo}</p>
+
+            <div className="flex items-center justify-between text-sm text-slate-300">
+              <span>Precio unitario:</span>
+              <span>
+                {precioUnitario > 0 ? `$${precioUnitario}` : "A convenir"}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-slate-300">
+              <span>Cantidad:</span>
+              <input
+                type="number"
+                min={1}
+                value={cantidad}
+                onChange={(e) =>
+                  setCantidad(Math.max(1, Number(e.target.value) || 1))
+                }
+                className="w-20 rounded-md bg-slate-800 border border-slate-600 px-2 py-1 text-right text-sm text-white"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-slate-300">
+              <span>Total estimado:</span>
+              <span>
+                {precioUnitario > 0 ? `$${totalEstimado}` : "A convenir"}
+              </span>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowCheckout(false)}
+                className="rounded-full bg-slate-700 px-4 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                disabled={creatingOrder}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmarCompra}
+                className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-60"
+                disabled={creatingOrder}
+              >
+                {creatingOrder ? "Procesando..." : "Confirmar compra"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
