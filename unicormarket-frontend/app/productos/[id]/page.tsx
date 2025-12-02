@@ -30,6 +30,7 @@ export default function PublicacionDetallePage() {
   const [data, setData] = useState<PublicacionDetalle | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [mensajeOrden, setMensajeOrden] = useState<string | null>(null);
 
   // Cargar publicación
   useEffect(() => {
@@ -55,6 +56,58 @@ export default function PublicacionDetallePage() {
     const token = localStorage.getItem("accessToken");
     setIsLoggedIn(!!token);
   }, []);
+
+  // Crear orden de compra
+  const handleCrearOrden = async () => {
+    try {
+      setMensajeOrden(null);
+
+      if (!data) {
+        setMensajeOrden("No se encontró la publicación");
+        return;
+      }
+
+      if (typeof window === "undefined") {
+        setMensajeOrden("No se pudo acceder al navegador");
+        return;
+      }
+
+      const token = localStorage.getItem("accessToken");
+
+      if (!token) {
+        setMensajeOrden("Debes iniciar sesión para crear una orden");
+        return;
+      }
+
+      const res = await api.post(
+        "/api/ordenes",
+        {
+          publicacion_id: data.id,
+          cantidad: 1,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (res.status !== 201) {
+        setMensajeOrden(
+          (res.data as any)?.message || "No se pudo crear la orden"
+        );
+        return;
+      }
+
+      setMensajeOrden("Orden creada correctamente ✅");
+    } catch (error: any) {
+      console.error("Error creando orden:", error);
+      const msg =
+        error?.response?.data?.message ||
+        "Error al crear la orden. Intenta de nuevo.";
+      setMensajeOrden(msg);
+    }
+  };
 
   if (loading) {
     return (
@@ -149,18 +202,31 @@ export default function PublicacionDetallePage() {
             </p>
 
             {isLoggedIn && (
-              <button
-                onClick={() => router.push(`/mensajes/${data.id}`)}
-                className="mt-2 inline-flex items-center rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
-              >
-                Abrir chat de la publicación
-              </button>
+              <>
+                <button
+                  onClick={() => router.push(`/mensajes/${data.id}`)}
+                  className="mt-2 inline-flex items-center rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
+                >
+                  Abrir chat de la publicación
+                </button>
+
+                <button
+                  onClick={handleCrearOrden}
+                  className="mt-3 inline-flex items-center rounded-full bg-blue-500 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-blue-400"
+                >
+                  Crear orden de compra
+                </button>
+              </>
             )}
 
             {!isLoggedIn && (
               <p className="mt-2 text-[11px] text-slate-500">
-                Inicia sesión para chatear con el propietario.
+                Inicia sesión para chatear o crear una orden de compra.
               </p>
+            )}
+
+            {mensajeOrden && (
+              <p className="mt-2 text-[11px] text-slate-300">{mensajeOrden}</p>
             )}
           </div>
 

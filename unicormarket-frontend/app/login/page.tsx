@@ -4,6 +4,8 @@ import { FormEvent, useState } from "react";
 import { api, setAuthToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 
+const token = localStorage.getItem("token");
+
 export default function LoginPage() {
   const router = useRouter();
   const [correo, setCorreo] = useState("");
